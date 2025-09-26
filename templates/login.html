@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Flask Items Manager{% endblock %}
+
+{% block header_title %}Welcome Back{% endblock %}
+{% block header_subtitle %}Sign in to access your personal items manager{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="form-container">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            
+            <div class="input-group">
+                {{ form.username.label() }}
+                {{ form.username(class="form-control") }}
+                {% if form.username.errors %}
+                    {% for error in form.username.errors %}
+                        <div class="alert alert-danger" style="margin-top: 10px; padding: 10px;">{{ error }}</div>
+                    {% endfor %}
+                {% endif %}
+            </div>
+            
+            <div class="input-group">
+                {{ form.password.label() }}
+                {{ form.password(class="form-control") }}
+                {% if form.password.errors %}
+                    {% for error in form.password.errors %}
+                        <div class="alert alert-danger" style="margin-top: 10px; padding: 10px;">{{ error }}</div>
+                    {% endfor %}
+                {% endif %}
+            </div>
+            
+            <div class="checkbox-group">
+                {{ form.remember_me() }}
+                {{ form.remember_me.label() }}
+            </div>
+            
+            {{ form.submit(class="btn btn-full-width") }}
+        </form>
+        
+        <div class="auth-footer">
+            <p>Don't have an account? <a href="{{ url_for('register') }}" class="auth-link">Create one here</a></p>
+        </div>
+    </div>
+</div>
+{% endblock %}
