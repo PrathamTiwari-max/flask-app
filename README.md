@@ -84,8 +84,8 @@ Deployed on Render with:
 ## Developer
 
 Pratham Tiwari
-- Computer Science Student (Final Year)
-- Full-Stack Developer specializing in Flask & React
+- Computer Science graduate 
+- Full-Stack Developer specializing in Flask & React, python development, generative AI
 - Location: Pimpri-Chinchwad, Maharashtra, India
 
 GitHub: https://github.com/PrathamTiwari-max
