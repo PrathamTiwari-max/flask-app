@@ -1,110 +1,148 @@
-from flask import Flask, jsonify, request, render_template
-from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from models import db, User, Item
+from forms import RegistrationForm, LoginForm
 import os
 
 app = Flask(__name__)
-CORS(app)
 
-# Database Configuration
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "items.db")}'
+# Configuration
+app.config['SECRET_KEY'] = 'your-development-secret-key-12345'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///items.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['WTF_CSRF_ENABLED'] = False  # Disable CSRF for now
 
-# Initialize database
-db = SQLAlchemy(app)
+# Initialize extensions
+db.init_app(app)
 
-# Database Model
-class Item(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+# Flask-Login setup
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access this page.'
+login_manager.login_message_category = 'info'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# Authentication Routes
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
     
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S')
-        }
+    form = RegistrationForm()
+    if form.validate_on_submit():
+        user = User(
+            username=form.username.data,
+            email=form.email.data
+        )
+        user.set_password(form.password.data)
+        
+        db.session.add(user)
+        db.session.commit()
+        
+        flash('Registration successful! Please log in.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html', form=form)
 
-# Health check endpoint
-@app.route("/health", methods=["GET"])
-def health():
-    try:
-        # Test database connection
-        db.session.execute(db.text('SELECT 1'))
-        return jsonify(status="ok", database="connected"), 200
-    except Exception as e:
-        return jsonify(status="error", message=str(e)), 500
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        
+        if user and user.check_password(form.password.data):
+            login_user(user, remember=form.remember_me.data)
+            flash('Login successful! Welcome back!', 'success')
+            
+            next_page = request.args.get('next')
+            return redirect(next_page) if next_page else redirect(url_for('index'))
+        else:
+            flash('Invalid username or password', 'danger')
+    
+    return render_template('login.html', form=form)
 
-# API endpoint for items
-@app.route("/api/items", methods=["GET", "POST"])
-def items_api():
-    if request.method == "POST":
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('You have been logged out successfully!', 'info')
+    return redirect(url_for('login'))
+
+# Main Application Routes
+@app.route('/')
+@login_required
+def index():
+    items = Item.query.filter_by(user_id=current_user.id).order_by(Item.created_at.desc()).all()
+    return render_template('index.html', items=items)
+
+@app.route('/add_item', methods=['POST'])
+@login_required
+def add_item():
+    name = request.form.get('name', '').strip()
+    description = request.form.get('description', '').strip()
+    
+    if name:
         try:
-            data = request.get_json(force=True)
-            
-            # Validate required fields
-            if not data.get('name', '').strip():
-                return jsonify(error="Name is required"), 400
-            
-            # Create new item
-            new_item = Item(
-                name=data.get('name', '').strip(),
-                description=data.get('description', '').strip() or None
+            item = Item(
+                name=name,
+                description=description if description else None,
+                user_id=current_user.id
             )
-            
-            # Save to database
-            db.session.add(new_item)
+            db.session.add(item)
             db.session.commit()
-            
-            return jsonify(
-                message="Item created successfully", 
-                item=new_item.to_dict()
-            ), 201
-            
+            flash(f'Item "{name}" added successfully!', 'success')
         except Exception as e:
             db.session.rollback()
-            return jsonify(error=f"Database error: {str(e)}"), 500
+            flash('Error adding item. Please try again.', 'danger')
+    else:
+        flash('Item name is required!', 'danger')
     
-    # GET request - return all items
-    try:
-        items = Item.query.order_by(Item.created_at.desc()).all()
-        return jsonify(items=[item.to_dict() for item in items]), 200
-    except Exception as e:
-        return jsonify(error=f"Database error: {str(e)}"), 500
+    return redirect(url_for('index'))
 
-# Get statistics
-@app.route("/api/stats", methods=["GET"])
-def get_stats():
-    try:
-        total_items = Item.query.count()
-        today_items = Item.query.filter(
-            Item.created_at >= datetime.utcnow().date()
-        ).count()
+@app.route('/delete_item/<int:item_id>', methods=['POST'])
+@login_required
+def delete_item(item_id):
+    item = Item.query.filter_by(id=item_id, user_id=current_user.id).first()
+    if item:
+        item_name = item.name
+        db.session.delete(item)
+        db.session.commit()
+        flash(f'Item "{item_name}" deleted successfully!', 'success')
+    else:
+        flash('Item not found!', 'danger')
+    
+    return redirect(url_for('index'))
+
+@app.route('/update_item/<int:item_id>', methods=['POST'])
+@login_required
+def update_item(item_id):
+    item = Item.query.filter_by(id=item_id, user_id=current_user.id).first()
+    if item:
+        new_name = request.form.get('name', '').strip()
+        new_description = request.form.get('description', '').strip()
         
-        return jsonify(
-            total_items=total_items,
-            items_today=today_items,
-            database_status="connected"
-        ), 200
-    except Exception as e:
-        return jsonify(error=f"Stats error: {str(e)}"), 500
+        if new_name:
+            item.name = new_name
+            item.description = new_description if new_description else None
+            db.session.commit()
+            flash(f'Item "{new_name}" updated successfully!', 'success')
+        else:
+            flash('Item name cannot be empty!', 'danger')
+    else:
+        flash('Item not found!', 'danger')
+    
+    return redirect(url_for('index'))
 
-# Frontend route
-@app.route("/")
-def home():
-    return render_template('index.html')
+# Database initialization
+with app.app_context():
+    db.create_all()
 
-# Initialize database using modern approach
-def init_db():
-    with app.app_context():
-        db.create_all()
-        print(" Database initialized successfully!")
-
-if __name__ == "__main__":
-    init_db()  # Create tables before running
+if __name__ == '__main__':
     app.run(debug=True)
